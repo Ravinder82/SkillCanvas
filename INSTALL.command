@@ -10,7 +10,7 @@ if ! command -v swiftc >/dev/null 2>&1; then
 fi
 mkdir -p "$HOME/Applications" "$APP/Contents/MacOS" "$APP/Contents/Resources"
 echo "Building SkillCanvas for this Mac..."
-swiftc -O -parse-as-library -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers -framework Security "$ROOT"/SkillCanvas/*.swift -o "$APP/Contents/MacOS/SkillCanvas"
+swiftc -O -parse-as-library -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers -framework Security -framework PDFKit "$ROOT"/SkillCanvas/*.swift -o "$APP/Contents/MacOS/SkillCanvas"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

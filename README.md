@@ -4,8 +4,12 @@
 
 ## Included
 - Native SwiftUI macOS app with onboarding and a polished dashboard
-- **The Chief — built-in AI operator:** a floating chat panel (⌘K) powered by any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, Ollama, LM Studio, or a custom server). It can search the web, read pages, read/write files in your library and workspace folders, and create, edit and install skills for you.
+- **The Chief — built-in AI operator:** a full sidebar tab (⌘K) powered by any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, Ollama, LM Studio, or a custom server). It can search the web, read pages, read/write files in your library and workspace folders, and create, edit and install skills for you.
+- **AI skill generation:**
+  - *From any GitHub repo URL* — The Chief fetches the repo's README and file tree (keyless, public GitHub API) and writes a tailored `SKILL.md`.
+  - *From your own ideas* — a text prompt plus attachments: images, text, markdown, PDF and code files (videos are not supported yet).
 - Universal provider setup: Name, Provider, Endpoint URL, API Key, Model ID — Create. Keys are stored in the macOS Keychain.
+- Collapsible panels for more working space: hide the app sidebar (⌘\) and the skill list (⇧⌘\); both positions are remembered.
 - Local skill library: create, import, edit, search, preview
 - Safe local installation to Antigravity and OpenCode global skill paths
 - ChatGPT/Codex plugin ZIP export (`plugin.json` + `skills/`)
@@ -35,7 +39,7 @@ Requires macOS 14+ and Xcode Command Line Tools (`xcode-select --install`). The 
 - App data is stored under `~/Library/Application Support/SkillCanvas/Library/`.
 
 ## Project layout
-- `SkillCanvas/` — native macOS application source (`main.swift`, `AIProvider.swift`, `AIChat.swift`, `AITools.swift`, `AIChatPanel.swift`)
+- `SkillCanvas/` — native macOS application source (`main.swift`, `AIProvider.swift`, `AIChat.swift`, `AITools.swift`, `AIChatPanel.swift`, `AIGenerate.swift`)
 - `INSTALL.command` — builds and installs the app bundle
 - `Examples/research-brief/` — sample skill
 - `Docs/PLATFORM_PATHS.md` — target path and package notes

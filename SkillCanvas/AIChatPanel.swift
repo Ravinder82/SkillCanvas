@@ -1,96 +1,12 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Layer: floating button + slide-over panel, on every page
-
-struct AIChatLayer: View {
-    @EnvironmentObject var ai: AIModel
-    @EnvironmentObject var model: AppModel
-    @State private var dragOrigin: CGPoint?
-    @State private var dragging = false
-
-    // Keeps the floating button fully on-screen, whatever the window size.
-    static func clamp(_ p: CGPoint, size: CGSize) -> CGPoint {
-        let half: CGFloat = 30, margin: CGFloat = 8
-        let minX = half + margin, maxX = max(minX, size.width - half - margin)
-        let minY = half + margin, maxY = max(minY, size.height - half - margin)
-        return CGPoint(x: min(max(p.x, minX), maxX), y: min(max(p.y, minY), maxY))
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .bottomTrailing) {
-                Color.clear
-                if ai.open {
-                    Group {
-                        if ai.expanded {
-                            AIChatPanel().frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else {
-                            AIChatPanel().frame(width: 452).frame(maxHeight: .infinity)
-                        }
-                    }
-                    .padding(ai.expanded ? 14 : 12)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: ai.expanded ? 16 : 22, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: ai.expanded ? 16 : 22, style: .continuous).stroke(Color.primary.opacity(0.10)))
-                    .shadow(color: .black.opacity(0.28), radius: 28, y: 12)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                    .zIndex(3)
-                } else {
-                    let size = geo.size
-                    let def = CGPoint(x: size.width - 49, y: size.height - 47)
-                    let target = Self.clamp(ai.buttonPos ?? def, size: size)
-                    Button {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { ai.open = true }
-                    } label: {
-                        ZStack(alignment: .topTrailing) {
-                            AppIconImage(size: 54)
-                            Circle().fill(ai.isStreaming ? Color.orange : Color.green)
-                                .frame(width: 14, height: 14)
-                                .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2.5))
-                                .offset(x: 3, y: -3)
-                        }
-                        .shadow(color: dragging ? .black.opacity(0.45) : .clear, radius: 16, y: 8)
-                    }
-                    .buttonStyle(.plain)
-                    .scaleEffect(dragging ? 1.08 : 1)
-                    .keyboardShortcut("k", modifiers: .command)
-                    .help("Open the Chief (⌘K) — drag anywhere to move this button")
-                    .padding(.trailing, 22).padding(.bottom, 20)
-                    .offset(x: target.x - def.x, y: target.y - def.y)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: dragging)
-                    .gesture(
-                        DragGesture()
-                            .onChanged { v in
-                                if dragOrigin == nil { dragOrigin = target }
-                                guard let origin = dragOrigin else { return }
-                                ai.buttonPos = Self.clamp(CGPoint(x: origin.x + v.translation.width, y: origin.y + v.translation.height), size: size)
-                                dragging = true
-                            }
-                            .onEnded { _ in
-                                dragOrigin = nil
-                                dragging = false
-                                ai.buttonPos = Self.clamp(ai.buttonPos ?? def, size: size)
-                                ai.persistButton()
-                            }
-                    )
-                    .transition(.opacity)
-                    .zIndex(2)
-                }
-            }
-            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: ai.open)
-            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: ai.expanded)
-        }
-        .sheet(isPresented: $ai.showSettings) {
-            ProviderSettingsView().environmentObject(ai).environmentObject(model)
-        }
-    }
-}
-
-// MARK: - Panel
+// MARK: - Full-page Chief chat (sidebar tab — no floating window)
 
 struct AIChatPanel: View {
     @EnvironmentObject var ai: AIModel
     @EnvironmentObject var model: AppModel
+    @Binding var page: Page
 
     var body: some View {
         VStack(spacing: 0) {
@@ -99,6 +15,8 @@ struct AIChatPanel: View {
             if ai.showHistory { historyList }
             messages
             if let tool = ai.busyTool { busyBar(tool) }
+            createRow
+            workingSkillBar
             Rectangle().fill(Color.primary.opacity(0.07)).frame(height: 1)
             composer
         }
@@ -107,32 +25,112 @@ struct AIChatPanel: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            AppIconImage(size: 30)
+            AppIconImage(size: 34)
             VStack(alignment: .leading, spacing: 1) {
-                Text("The Chief").font(.system(size: 14, weight: .bold))
-                Text(ai.active.map { "\($0.modelID)" } ?? "No provider connected")
+                Text("The Chief").font(.system(size: 17, weight: .bold, design: .rounded))
+                Text(ai.active.map { "\($0.modelID)" } ?? "No provider connected — add one to start")
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
             headerButton("plus", "New chat") { ai.newChat() }
             headerButton("clock", "History") { withAnimation { ai.showHistory.toggle() } }
-            headerButton("gearshape", "Providers") { ai.showSettings = true }
-            headerButton(ai.expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                         ai.expanded ? "Shrink panel" : "Expand to full window") {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { ai.expanded.toggle() }
-            }
-            .keyboardShortcut("e", modifiers: [.command, .shift])
-            headerButton("xmark", "Close (⌘K)") { withAnimation { ai.open = false } }
+            headerButton("gearshape", "Providers & settings") { ai.showSettings = true }
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
+        .padding(.horizontal, 18).padding(.vertical, 14)
     }
 
     private func headerButton(_ icon: String, _ tip: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: icon).font(.system(size: 12, weight: .semibold)).frame(width: 26, height: 26) }
+        Button(action: action) { Image(systemName: icon).font(.system(size: 12, weight: .semibold)).frame(width: 28, height: 28) }
             .buttonStyle(.plain).foregroundStyle(.secondary)
             .background(Circle().fill(Color.primary.opacity(0.06)))
             .help(tip)
     }
+
+    // Quick-create entries: skills from a GitHub repo URL, or from prompt + files.
+    // Quick-create entries: skills from a GitHub repo URL, or from prompt + files.
+    private var createRow: some View {
+        HStack(spacing: 8) {
+            Button { ai.createMode = .github; ai.showCreate = true } label: {
+                Label("Skill from GitHub repo", systemImage: "link")
+                    .font(.system(size: 11, weight: .semibold)).padding(.horizontal, 11).padding(.vertical, 7)
+            }.buttonStyle(.bordered).help("Fetch a repo's README + file tree, then write SKILL.md (⇧⌘N)")
+            Button { ai.createMode = .prompt; ai.showCreate = true } label: {
+                Label("Skill from prompt & files", systemImage: "sparkles")
+                    .font(.system(size: 11, weight: .semibold)).padding(.horizontal, 11).padding(.vertical, 7)
+            }.buttonStyle(.bordered).help("Describe your idea, attach images / docs / code — the Chief writes the skill")
+            Spacer()
+        }.padding(.horizontal, 16).padding(.top, 10)
+    }
+    
+    @ViewBuilder
+    private var workingSkillBar: some View {
+        if let item = model.selected {
+            VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.name).font(.system(size: 13, weight: .semibold))
+                    Text(item.description).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Spacer()
+                Button {
+                    model.selectedID = item.id
+                    page = .library
+                } label: {
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                        .background(Color.primary.opacity(0.08))
+                        .cornerRadius(6)
+                }
+            }
+            
+            HStack(spacing: 8) {
+                Button {
+                    model.selectedID = item.id
+                    ai.showCreate = true
+                    model.editMode = true
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Edit SKILL.md")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.primary)
+                }
+                
+                Button {
+                    model.selectedID = item.id
+                    ai.showCreate = true
+                    model.createSkill()
+                } label: {
+                    Image(systemName: "box.arrow.in")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Install")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.purple)
+                }
+                
+                Button {
+                    model.selectedID = item.id
+                    ai.exportDialog = true
+                } label: {
+                    Image(systemName: "box.arrow.up")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Export")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.green)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .background(Color(nsColor: .underPageBackgroundColor))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.1), lineWidth: 1))
+        }
+    }
+}
+    
+
+    
+
 
     private var historyList: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -177,18 +175,16 @@ struct AIChatPanel: View {
                         }.id("streaming").padding(.leading, 4)
                     }
                 }
-                .frame(maxWidth: ai.expanded ? 860 : .infinity, alignment: .leading)
+                .frame(maxWidth: 860, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(16)
             }
             .onChange(of: ai.messages) { _, _ in
-                if ai.open {
-                    if let last = ai.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
-                    else { proxy.scrollTo("streaming", anchor: .bottom) }
-                }
+                if let last = ai.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                else { proxy.scrollTo("streaming", anchor: .bottom) }
             }
             .onChange(of: ai.streamingText) { _, _ in
-                if ai.open, !ai.streamingText.isEmpty { proxy.scrollTo("streaming", anchor: .bottom) }
+                if !ai.streamingText.isEmpty { proxy.scrollTo("streaming", anchor: .bottom) }
             }
         }
     }
@@ -220,7 +216,6 @@ struct AIChatPanel: View {
                     .disabled(ai.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .padding(12)
     }
 }
 

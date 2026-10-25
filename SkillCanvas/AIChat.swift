@@ -43,11 +43,12 @@ struct ToolResult: Equatable {
     @Published var isStreaming = false
     @Published var busyTool: String?
     @Published var streamingText = ""
-    @Published var open = false
-    @Published var expanded = false
-    @Published var buttonPos: CGPoint?
     @Published var showSettings = false
     @Published var showHistory = false
+    @Published var showCreate = false
+    @Published var createMode: CreateMode = .github
+    @Published var editMode: Bool = false
+    @Published var exportDialog = false
     @Published var workspaces: [String] = []
 
     weak var app: AppModel?
@@ -58,15 +59,6 @@ struct ToolResult: Equatable {
             .appendingPathComponent("SkillCanvas", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         load()
-        if let arr = UserDefaults.standard.array(forKey: "skillcanvas.chiefButton") as? [Double], arr.count == 2 {
-            buttonPos = CGPoint(x: arr[0], y: arr[1])
-        }
-    }
-
-    // Persist the dragged position of the floating Chief button (absolute window coords).
-    func persistButton() {
-        guard let p = buttonPos else { return }
-        UserDefaults.standard.set([Double(p.x), Double(p.y)], forKey: "skillcanvas.chiefButton")
     }
 
     var active: AIProvider? { providers.first { $0.id == activeID } }

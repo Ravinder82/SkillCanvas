@@ -32,6 +32,8 @@ enum PackageKind { case chatGPT, gemini }
     @Published var search = ""
     @Published var status: String?
     @Published var onboarding = !UserDefaults.standard.bool(forKey: "skillcanvas.onboarded")
+    @Published var editMode = false
+    @Published var exportDialog = false
     let base: URL
     let library: URL
     init() {
@@ -159,24 +161,84 @@ Do not upload secrets or unreviewed executable files.
     var body: some Scene { WindowGroup { MainView().frame(minWidth: 980, minHeight: 650).sheet(isPresented: $model.onboarding) { OnboardingView().environmentObject(model) }.environmentObject(model) }.windowStyle(.hiddenTitleBar).commands { CommandGroup(replacing: .newItem) { Button("New Skill") { model.createSkill() }.keyboardShortcut("n", modifiers: .command) } } }
 }
 
-enum Page: String, CaseIterable { case overview = "Overview", library = "Skill Library", installs = "Local Installs", packages = "Cloud Packages", settings = "Settings"; var icon: String { switch self { case .overview: "square.grid.2x2.fill"; case .library: "square.stack.3d.up.fill"; case .installs: "desktopcomputer"; case .packages: "shippingbox.fill"; case .settings: "gearshape.fill" } } }
+enum Page: String, CaseIterable { case overview = "Overview", library = "Skill Library", chief = "The Chief", installs = "Local Installs", packages = "Cloud Packages", settings = "Settings"; var icon: String { switch self { case .overview: "square.grid.2x2.fill"; case .library: "square.stack.3d.up.fill"; case .chief: "sparkles"; case .installs: "desktopcomputer"; case .packages: "shippingbox.fill"; case .settings: "gearshape.fill" } } }
+
+extension Notification.Name { static let skillCanvasToggleList = Notification.Name("skillCanvasToggleList") }
 
 struct MainView: View {
     @EnvironmentObject var model: AppModel
     @StateObject private var ai = AIModel()
     @State private var page: Page = .overview
+    @State private var sidebarOff = UserDefaults.standard.bool(forKey: "skillcanvas.sidebarOff")
     var body: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 10) { AppIconImage(size: 38); VStack(alignment: .leading, spacing: 1) { Text("SkillCanvas").font(.system(size: 16, weight: .bold)); Text("AI capability studio").font(.system(size: 10)).foregroundStyle(.secondary) } }.padding(.horizontal, 17).padding(.top, 25).padding(.bottom, 25)
+            sidebar
+            ZStack { Color(nsColor: .windowBackgroundColor); switch page {
+                case .overview: DashboardView(page: $page)
+                case .library: LibraryView()
+                case .chief: AIChatPanel(page: $page).environmentObject(ai)
+                case .installs: InstallsView()
+                case .packages: PackagesView()
+                case .settings: SettingsView()
+            } }
+            .environmentObject(ai)
+            .sheet(isPresented: $ai.showSettings) { ProviderSettingsView().environmentObject(ai).environmentObject(model) }
+        }.overlay(alignment: .bottom) { if let message = model.status { HStack(spacing: 9) { Image(systemName: "info.circle.fill").foregroundStyle(.blue); Text(message).font(.system(size: 11, weight: .medium)); Spacer(); Button { model.status = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }.padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).padding(15).transition(.move(edge: .bottom).combined(with: .opacity)) } }.animation(.easeInOut(duration: 0.2), value: model.status)
+            .sheet(isPresented: $ai.showCreate) { AICreateSheet().environmentObject(ai).environmentObject(model) }
+            .background(shortcuts)
+            .onAppear { ai.app = model; if ProcessInfo.processInfo.environment["SKILLCANVAS_GENTEST"] == "1" { AIGenSelfTest.run(ai: ai, model: model) } }
+    }
+
+    // Hidden menu-style shortcuts: ⌘1–⌘5 pages, ⌘K Chief, ⌘\ sidebar, ⇧⌘N AI create.
+    private var shortcuts: some View {
+        ZStack {
+            ForEach(Array(Page.allCases.enumerated()), id: \.element) { i, p in
+                Button(p.rawValue) { page = p }.keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command).opacity(0)
+            }
+            Button("The Chief") { page = .chief }.keyboardShortcut("k", modifiers: .command).opacity(0)
+            Button("Toggle sidebar") { setSidebar(!sidebarOff) }.keyboardShortcut("\\", modifiers: .command).opacity(0)
+            Button("Create skill with AI") { ai.createMode = .github; ai.showCreate = true }.keyboardShortcut("n", modifiers: [.command, .shift]).opacity(0)
+            // Shift+\ produces "|" in the key event, so register both spellings.
+            Button("Toggle skill list") { NotificationCenter.default.post(name: .skillCanvasToggleList, object: nil) }.keyboardShortcut("\\", modifiers: [.command, .shift]).opacity(0)
+            Button("Toggle skill list") { NotificationCenter.default.post(name: .skillCanvasToggleList, object: nil) }.keyboardShortcut("|", modifiers: [.command, .shift]).opacity(0)
+        }
+        .frame(width: 0, height: 0)
+    }
+
+    private func setSidebar(_ off: Bool) {
+        withAnimation(.easeInOut(duration: 0.2)) { sidebarOff = off }
+        UserDefaults.standard.set(off, forKey: "skillcanvas.sidebarOff")
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                AppIconImage(size: sidebarOff ? 30 : 38)
+                if !sidebarOff {
+                    VStack(alignment: .leading, spacing: 1) { Text("SkillCanvas").font(.system(size: 16, weight: .bold)); Text("AI capability studio").font(.system(size: 10)).foregroundStyle(.secondary) }
+                    Spacer(minLength: 0)
+                    Button { setSidebar(true) } label: { Image(systemName: "chevron.left").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary).frame(width: 24, height: 24).background(Circle().fill(Color.primary.opacity(0.07))) }.buttonStyle(.plain).help("Hide sidebar (⌘\\)")
+                }
+            }.padding(.horizontal, sidebarOff ? 0 : 17).padding(.top, 25).padding(.bottom, 25).frame(maxWidth: .infinity)
+            if sidebarOff {
+                Button { setSidebar(false) } label: { Image(systemName: "sidebar.left").font(.system(size: 14, weight: .semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 8) }.buttonStyle(.plain).help("Show sidebar (⌘\\)")
+            } else {
                 Text("WORKSPACE").font(.system(size: 10, weight: .bold)).tracking(1.2).foregroundStyle(.tertiary).padding(.horizontal, 20).padding(.bottom, 5)
-                ForEach(Page.allCases.filter { $0 != .settings }, id: \.self) { p in Button { page = p } label: { HStack(spacing: 12) { Image(systemName: p.icon).frame(width: 18); Text(p.rawValue); Spacer() }.font(.system(size: 13, weight: page == p ? .semibold : .medium)).foregroundStyle(page == p ? .white : Color.primary.opacity(0.78)).padding(.horizontal, 12).padding(.vertical, 10).background { if page == p { RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.gradient) } } }.buttonStyle(.plain).padding(.horizontal, 10) }
-                Spacer()
+            }
+            ForEach(Page.allCases.filter { $0 != .settings }, id: \.self) { p in Button { page = p } label: {
+                Group {
+                    if sidebarOff { Image(systemName: p.icon).frame(maxWidth: .infinity) }
+                    else { HStack(spacing: 12) { Image(systemName: p.icon).frame(width: 18); Text(p.rawValue); Spacer() } }
+                }
+                .font(.system(size: 13, weight: page == p ? .semibold : .medium)).foregroundStyle(page == p ? .white : Color.primary.opacity(0.78)).padding(.horizontal, 12).padding(.vertical, 10).background { if page == p { RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.gradient) } } }.buttonStyle(.plain).padding(.horizontal, sidebarOff ? 6 : 10) }
+            Spacer()
+            if sidebarOff {
+                Button { page = .settings } label: { Image(systemName: "gearshape").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 10) }.buttonStyle(.plain).padding(.bottom, 10)
+            } else {
                 VStack(alignment: .leading, spacing: 8) { Label("Local-first by design", systemImage: "lock.shield").font(.system(size: 11, weight: .medium)); Text("Your library stays on this Mac. Install and export only when you choose.").font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }.padding(13).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12)).padding(12)
                 Button { page = .settings } label: { Label("Settings", systemImage: "gearshape").font(.system(size: 12, weight: .medium)).frame(maxWidth: .infinity, alignment: .leading).padding(12) }.buttonStyle(.plain).padding(.horizontal, 8).padding(.bottom, 12)
-            }.frame(width: 220).background(Color(nsColor: .underPageBackgroundColor)).overlay(alignment: .trailing) { Rectangle().fill(Color.primary.opacity(0.07)).frame(width: 1) }
-            ZStack { Color(nsColor: .windowBackgroundColor); switch page { case .overview: DashboardView(page: $page); case .library: LibraryView(); case .installs: InstallsView(); case .packages: PackagesView(); case .settings: SettingsView() } }
-        }.overlay(alignment: .bottom) { if let message = model.status { HStack(spacing: 9) { Image(systemName: "info.circle.fill").foregroundStyle(.blue); Text(message).font(.system(size: 11, weight: .medium)); Spacer(); Button { model.status = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }.padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).padding(15).transition(.move(edge: .bottom).combined(with: .opacity)) } }.animation(.easeInOut(duration: 0.2), value: model.status).overlay { AIChatLayer().environmentObject(ai).environmentObject(model) }.onAppear { ai.app = model }
+            }
+        }.frame(width: sidebarOff ? 56 : 220).background(Color(nsColor: .underPageBackgroundColor)).overlay(alignment: .trailing) { Rectangle().fill(Color.primary.opacity(0.07)).frame(width: 1) }
     }
 }
 
@@ -195,12 +257,61 @@ struct DashboardView: View {
 
 struct LibraryView: View {
     @EnvironmentObject var model: AppModel
+    @EnvironmentObject var ai: AIModel
     @State private var editing = false; @State private var text = ""; @State private var installSheet = false; @State private var targets: Set<InstallTarget> = Set(InstallTarget.allCases); @State private var exportDialog = false
+    @State private var listOff = UserDefaults.standard.bool(forKey: "skillcanvas.libraryListOff")
     var body: some View { HStack(spacing: 0) {
-        VStack(alignment: .leading, spacing: 13) { HStack { Text("Skill Library").font(.system(size: 20, weight: .bold, design: .rounded)); Spacer(); Button { model.createSkill() } label: { Image(systemName: "plus").padding(7).background(.purple.opacity(0.12), in: Circle()) }.buttonStyle(.plain) }; TextField("Search skills", text: $model.search).textFieldStyle(.roundedBorder); Button { model.importSkill() } label: { Label("Import folder…", systemImage: "square.and.arrow.down").font(.system(size: 11)) }.buttonStyle(.plain).foregroundStyle(.secondary); ScrollView { VStack(spacing: 5) { ForEach(model.filtered) { item in Button { model.selectedID = item.id } label: { HStack(spacing: 9) { Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(.purple).frame(width: 29, height: 29).background(.purple.opacity(0.1), in: RoundedRectangle(cornerRadius: 8)); VStack(alignment: .leading, spacing: 3) { Text(item.name).font(.system(size: 11, weight: .semibold)).lineLimit(1); Text(item.description).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(2) }; Spacer(minLength: 0) }.padding(8).background(model.selectedID == item.id ? Color.accentColor.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 9)) }.buttonStyle(.plain) } } }; Spacer() }.padding(16).frame(width: 255).background(Color(nsColor: .underPageBackgroundColor)); Rectangle().fill(.primary.opacity(0.07)).frame(width: 1)
-        if let item = model.selected { ScrollView { VStack(alignment: .leading, spacing: 18) { HStack(alignment: .top) { VStack(alignment: .leading, spacing: 7) { Label("SKILL PACKAGE", systemImage: "puzzlepiece.extension.fill").font(.system(size: 9, weight: .bold)).tracking(1).foregroundStyle(.secondary); Text(item.name).font(.system(size: 25, weight: .bold, design: .rounded)); Text(item.description).font(.system(size: 12)).foregroundStyle(.secondary) }; Spacer(); Button("Edit SKILL.md", systemImage: "pencil") { text = (try? String(contentsOf: item.folder.appendingPathComponent("SKILL.md"), encoding: .utf8)) ?? ""; editing = true }.buttonStyle(.bordered) }; HStack { Button { installSheet = true } label: { Label("Install Locally", systemImage: "desktopcomputer").frame(maxWidth: .infinity).padding(.vertical, 6) }.buttonStyle(.borderedProminent); Button { exportDialog = true } label: { Label("Prepare Cloud Package", systemImage: "shippingbox").frame(maxWidth: .infinity).padding(.vertical, 6) }.buttonStyle(.bordered) }; VStack(alignment: .leading, spacing: 9) { Text("Package contents").font(.system(size: 14, weight: .bold)); Label("SKILL.md instructions and trigger description", systemImage: "doc.text"); Label("Optional references, assets, and scripts", systemImage: "folder"); Label("SkillCanvas never executes imported scripts", systemImage: "checkmark.shield").foregroundStyle(.secondary) }.font(.system(size: 11)).padding(15).frame(maxWidth: .infinity, alignment: .leading).background(.background, in: RoundedRectangle(cornerRadius: 13)); VStack(alignment: .leading, spacing: 9) { Text("SKILL.md preview").font(.system(size: 14, weight: .bold)); Text((try? String(contentsOf: item.folder.appendingPathComponent("SKILL.md"), encoding: .utf8)) ?? "Unreadable skill").font(.system(size: 10, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(13).background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 11)) } }.padding(24) }.sheet(isPresented: $editing) { VStack(alignment: .leading, spacing: 12) { HStack { Text("Edit Skill").font(.system(size: 19, weight: .bold)); Spacer(); Button("Cancel") { editing = false }; Button("Save") { model.saveEditor(text); editing = false }.buttonStyle(.borderedProminent) }; TextEditor(text: $text).font(.system(size: 12, design: .monospaced)).padding(7).overlay(RoundedRectangle(cornerRadius: 8).stroke(.primary.opacity(0.1))) }.padding(18).frame(width: 690, height: 500).environmentObject(model) }.sheet(isPresented: $installSheet) { VStack(alignment: .leading, spacing: 15) { Text("Install skill locally").font(.system(size: 19, weight: .bold)); Text("Select destinations. Existing skill folders are never overwritten.").font(.system(size: 11)).foregroundStyle(.secondary); ForEach(InstallTarget.allCases) { target in Toggle(isOn: Binding(get: { targets.contains(target) }, set: { value in if value { targets.insert(target) } else { targets.remove(target) } })) { VStack(alignment: .leading, spacing: 4) { Text(target.rawValue).font(.system(size: 12, weight: .semibold)); Text(target.displayPath).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled) } }.toggleStyle(.checkbox) }; Spacer(); HStack { Spacer(); Button("Cancel") { installSheet = false }; Button("Install") { model.install(targets); installSheet = false }.buttonStyle(.borderedProminent).disabled(targets.isEmpty) } }.padding(22).frame(width: 500, height: 280).environmentObject(model) }.confirmationDialog("Export package", isPresented: $exportDialog, titleVisibility: .visible) { Button("ChatGPT / Codex Plugin ZIP") { model.export(.chatGPT) }; Button("Gemini Gem Starter ZIP") { model.export(.gemini) } } message: { Text("Packages are prepared locally. They are not automatically uploaded or installed in a cloud account.") }
-        } else { EmptyState(icon: "square.stack.3d.up", title: "Your library starts here", message: "Create a skill or import a folder containing SKILL.md.").padding(24) }
-    } }
+        if listOff { collapsedList } else {
+        VStack(alignment: .leading, spacing: 13) { HStack { Text("Skill Library").font(.system(size: 20, weight: .bold, design: .rounded)); Spacer(); Button { setList(true) } label: { Image(systemName: "sidebar.left").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary).frame(width: 26, height: 26).background(Circle().fill(Color.primary.opacity(0.07))) }.buttonStyle(.plain).help("Hide the skill list (⇧⌘\\)"); Button { ai.createMode = .github; ai.showCreate = true } label: { Image(systemName: "sparkles").font(.system(size: 12, weight: .semibold)).foregroundStyle(.purple).frame(width: 26, height: 26).background(.purple.opacity(0.12), in: Circle()) }.buttonStyle(.plain).help("Create a skill with The Chief"); Button { model.createSkill() } label: { Image(systemName: "plus").padding(7).background(.purple.opacity(0.12), in: Circle()) }.buttonStyle(.plain) }; TextField("Search skills", text: $model.search).textFieldStyle(.roundedBorder); Button { model.importSkill() } label: { Label("Import folder…", systemImage: "square.and.arrow.down").font(.system(size: 11)) }.buttonStyle(.plain).foregroundStyle(.secondary); ScrollView { VStack(spacing: 5) { ForEach(model.filtered) { item in Button { model.selectedID = item.id } label: { HStack(spacing: 9) { Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(.purple).frame(width: 29, height: 29).background(.purple.opacity(0.1), in: RoundedRectangle(cornerRadius: 8)); VStack(alignment: .leading, spacing: 3) { Text(item.name).font(.system(size: 11, weight: .semibold)).lineLimit(1); Text(item.description).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(2) }; Spacer(minLength: 0) }.padding(8).background(model.selectedID == item.id ? Color.accentColor.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 9)) }.buttonStyle(.plain) } } }; Spacer() }.padding(16).frame(width: 255).background(Color(nsColor: .underPageBackgroundColor)); Rectangle().fill(.primary.opacity(0.07)).frame(width: 1)
+        }
+        if let item = model.selected { VStack(spacing: 0) { ScrollView { VStack(alignment: .leading, spacing: 18) { HStack(alignment: .top) { VStack(alignment: .leading, spacing: 7) { Label("SKILL PACKAGE", systemImage: "puzzlepiece.extension.fill").font(.system(size: 9, weight: .bold)).tracking(1).foregroundStyle(.secondary); Text(item.name).font(.system(size: 25, weight: .bold, design: .rounded)); Text(item.description).font(.system(size: 12)).foregroundStyle(.secondary) }; Spacer(); Button("Edit SKILL.md", systemImage: "pencil") { text = (try? String(contentsOf: item.folder.appendingPathComponent("SKILL.md"), encoding: .utf8)) ?? ""; editing = true }.buttonStyle(.bordered) }; HStack { Button { installSheet = true } label: { Label("Install Locally", systemImage: "desktopcomputer").frame(maxWidth: .infinity).padding(.vertical, 6) }.buttonStyle(.borderedProminent); Button { exportDialog = true } label: { Label("Prepare Cloud Package", systemImage: "shippingbox").frame(maxWidth: .infinity).padding(.vertical, 6) }.buttonStyle(.bordered) }; VStack(alignment: .leading, spacing: 9) { Text("Package contents").font(.system(size: 14, weight: .bold)); Label("SKILL.md instructions and trigger description", systemImage: "doc.text"); Label("Optional references, assets, and scripts", systemImage: "folder"); Label("SkillCanvas never executes imported scripts", systemImage: "checkmark.shield").foregroundStyle(.secondary) }.font(.system(size: 11)).padding(15).frame(maxWidth: .infinity, alignment: .leading).background(.background, in: RoundedRectangle(cornerRadius: 13)); VStack(alignment: .leading, spacing: 9) { Text("SKILL.md preview").font(.system(size: 14, weight: .bold)); Text((try? String(contentsOf: item.folder.appendingPathComponent("SKILL.md"), encoding: .utf8)) ?? "Unreadable skill").font(.system(size: 10, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(13).background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 11)) } }.padding(24) }.sheet(isPresented: $editing) { VStack(alignment: .leading, spacing: 12) { HStack { Text("Edit Skill").font(.system(size: 19, weight: .bold)); Spacer(); Button("Cancel") { editing = false }; Button("Save") { model.saveEditor(text); editing = false }.buttonStyle(.borderedProminent) }; TextEditor(text: $text).font(.system(size: 12, design: .monospaced)).padding(7).overlay(RoundedRectangle(cornerRadius: 8).stroke(.primary.opacity(0.1))) }.padding(18).frame(width: 690, height: 500).environmentObject(model) }.sheet(isPresented: $installSheet) { VStack(alignment: .leading, spacing: 15) { Text("Install skill locally").font(.system(size: 19, weight: .bold)); Text("Select destinations. Existing skill folders are never overwritten.").font(.system(size: 11)).foregroundStyle(.secondary); ForEach(InstallTarget.allCases) { target in Toggle(isOn: Binding(get: { targets.contains(target) }, set: { value in if value { targets.insert(target) } else { targets.remove(target) } })) { VStack(alignment: .leading, spacing: 4) { Text(target.rawValue).font(.system(size: 12, weight: .semibold)); Text(target.displayPath).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled) } }.toggleStyle(.checkbox) }; Spacer(); HStack { Spacer(); Button("Cancel") { installSheet = false }; Button("Install") { model.install(targets); installSheet = false }.buttonStyle(.borderedProminent).disabled(targets.isEmpty) } }.padding(22).frame(width: 500, height: 280).environmentObject(model) }.confirmationDialog("Export package", isPresented: $exportDialog, titleVisibility: .visible) { Button("ChatGPT / Codex Plugin ZIP") { model.export(.chatGPT) }; Button("Gemini Gem Starter ZIP") { model.export(.gemini) } } message: { Text("Packages are prepared locally. They are not automatically uploaded or installed in a cloud account.") }
+        }; Rectangle().fill(Color.primary.opacity(0.07)).frame(height: 1); chiefComposer } else { EmptyState(icon: "square.stack.3d.up", title: "Your library starts here", message: "Create a skill or import a folder containing SKILL.md.").padding(24) }
+    }
+    // ⇧⌘\ / ⇧⌘| is registered in MainView.shortcuts and arrives as a notification.
+    .onReceive(NotificationCenter.default.publisher(for: .skillCanvasToggleList)) { _ in setList(!listOff) }
+    }
+
+    private var collapsedList: some View {
+        VStack(spacing: 10) {
+            Button { setList(false) } label: { Image(systemName: "sidebar.left").font(.system(size: 14, weight: .semibold)).foregroundStyle(.secondary).frame(width: 30, height: 30).background(Circle().fill(Color.primary.opacity(0.07))) }.buttonStyle(.plain).help("Show the skill list (⇧⌘\\)")
+            Button { ai.createMode = .github; ai.showCreate = true } label: { Image(systemName: "sparkles").font(.system(size: 13, weight: .semibold)).foregroundStyle(.purple).frame(width: 30, height: 30).background(.purple.opacity(0.12), in: Circle()) }.buttonStyle(.plain).help("Create a skill with The Chief")
+            Button { model.createSkill() } label: { Image(systemName: "plus").font(.system(size: 13, weight: .semibold)).foregroundStyle(.purple).frame(width: 30, height: 30).background(.purple.opacity(0.12), in: Circle()) }.buttonStyle(.plain).help("New draft skill")
+            Spacer()
+        }.padding(.top, 22).frame(width: 52).background(Color(nsColor: .underPageBackgroundColor))
+            .overlay(alignment: .trailing) { Rectangle().fill(.primary.opacity(0.07)).frame(width: 1) }
+    }
+
+    private func setList(_ off: Bool) {
+        withAnimation(.easeInOut(duration: 0.2)) { listOff = off }
+        UserDefaults.standard.set(off, forKey: "skillcanvas.libraryListOff")
+    }
+
+    // Chief AI Agent text field — chat app style composer below the playground
+    private var chiefComposer: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("The Chief").font(.system(size: 12, weight: .bold)).tracking(1).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 10)
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Ask the Chief to search, read, write…", text: $ai.input, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .lineLimit(1...6)
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+                    .onSubmit { ai.send() }
+                if ai.isStreaming {
+                    Button { ai.stop() } label: { Image(systemName: "stop.circle.fill").font(.system(size: 28)) }
+                        .buttonStyle(.plain).foregroundStyle(.red)
+                } else {
+                    Button { ai.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 28)) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(ai.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.secondary.opacity(0.5) : Color.accentColor)
+                        .disabled(ai.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(16)
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+    }
 }
 
 struct InstallsView: View {
