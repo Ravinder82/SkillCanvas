@@ -1,0 +1,15 @@
+.DS_Store
+*.swp
+*~
+
+# Build output
+build/
+dist/
+*.app/
+
+# Xcode / SwiftPM
+.build/
+DerivedData/
+xcuserdata/
+*.xcodeproj/
+Package.resolved
