@@ -163,6 +163,7 @@ enum Page: String, CaseIterable { case overview = "Overview", library = "Skill L
 
 struct MainView: View {
     @EnvironmentObject var model: AppModel
+    @StateObject private var ai = AIModel()
     @State private var page: Page = .overview
     var body: some View {
         HStack(spacing: 0) {
@@ -175,7 +176,7 @@ struct MainView: View {
                 Button { page = .settings } label: { Label("Settings", systemImage: "gearshape").font(.system(size: 12, weight: .medium)).frame(maxWidth: .infinity, alignment: .leading).padding(12) }.buttonStyle(.plain).padding(.horizontal, 8).padding(.bottom, 12)
             }.frame(width: 220).background(Color(nsColor: .underPageBackgroundColor)).overlay(alignment: .trailing) { Rectangle().fill(Color.primary.opacity(0.07)).frame(width: 1) }
             ZStack { Color(nsColor: .windowBackgroundColor); switch page { case .overview: DashboardView(page: $page); case .library: LibraryView(); case .installs: InstallsView(); case .packages: PackagesView(); case .settings: SettingsView() } }
-        }.overlay(alignment: .bottom) { if let message = model.status { HStack(spacing: 9) { Image(systemName: "info.circle.fill").foregroundStyle(.blue); Text(message).font(.system(size: 11, weight: .medium)); Spacer(); Button { model.status = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }.padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).padding(15).transition(.move(edge: .bottom).combined(with: .opacity)) } }.animation(.easeInOut(duration: 0.2), value: model.status)
+        }.overlay(alignment: .bottom) { if let message = model.status { HStack(spacing: 9) { Image(systemName: "info.circle.fill").foregroundStyle(.blue); Text(message).font(.system(size: 11, weight: .medium)); Spacer(); Button { model.status = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }.padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).padding(15).transition(.move(edge: .bottom).combined(with: .opacity)) } }.animation(.easeInOut(duration: 0.2), value: model.status).overlay { AIChatLayer().environmentObject(ai).environmentObject(model) }.onAppear { ai.app = model }
     }
 }
 

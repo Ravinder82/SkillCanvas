@@ -4,11 +4,13 @@
 
 ## Included
 - Native SwiftUI macOS app with onboarding and a polished dashboard
+- **The Chief — built-in AI operator:** a floating chat panel (⌘K) powered by any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, Ollama, LM Studio, or a custom server). It can search the web, read pages, read/write files in your library and workspace folders, and create, edit and install skills for you.
+- Universal provider setup: Name, Provider, Endpoint URL, API Key, Model ID — Create. Keys are stored in the macOS Keychain.
 - Local skill library: create, import, edit, search, preview
 - Safe local installation to Antigravity and OpenCode global skill paths
 - ChatGPT/Codex plugin ZIP export (`plugin.json` + `skills/`)
 - Gemini Gem starter ZIP export with setup guide
-- Local-first storage; no API keys, network, telemetry, or paid services required
+- Local-first storage; no telemetry or paid services required
 
 ## Install
 1. Unzip `SkillCanvas.zip`.
@@ -33,7 +35,7 @@ Requires macOS 14+ and Xcode Command Line Tools (`xcode-select --install`). The 
 - App data is stored under `~/Library/Application Support/SkillCanvas/Library/`.
 
 ## Project layout
-- `SkillCanvas/main.swift` — native macOS application source
+- `SkillCanvas/` — native macOS application source (`main.swift`, `AIProvider.swift`, `AIChat.swift`, `AITools.swift`, `AIChatPanel.swift`)
 - `INSTALL.command` — builds and installs the app bundle
 - `Examples/research-brief/` — sample skill
 - `Docs/PLATFORM_PATHS.md` — target path and package notes
