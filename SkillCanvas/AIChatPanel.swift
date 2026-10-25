@@ -6,40 +6,80 @@ import AppKit
 struct AIChatLayer: View {
     @EnvironmentObject var ai: AIModel
     @EnvironmentObject var model: AppModel
+    @State private var dragOrigin: CGPoint?
+    @State private var dragging = false
+
+    // Keeps the floating button fully on-screen, whatever the window size.
+    static func clamp(_ p: CGPoint, size: CGSize) -> CGPoint {
+        let half: CGFloat = 30, margin: CGFloat = 8
+        let minX = half + margin, maxX = max(minX, size.width - half - margin)
+        let minY = half + margin, maxY = max(minY, size.height - half - margin)
+        return CGPoint(x: min(max(p.x, minX), maxX), y: min(max(p.y, minY), maxY))
+    }
+
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Color.clear
-            if ai.open {
-                AIChatPanel()
-                    .frame(width: 452)
-                    .frame(maxHeight: .infinity)
-                    .padding(12)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.primary.opacity(0.10)))
+        GeometryReader { geo in
+            ZStack(alignment: .bottomTrailing) {
+                Color.clear
+                if ai.open {
+                    Group {
+                        if ai.expanded {
+                            AIChatPanel().frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            AIChatPanel().frame(width: 452).frame(maxHeight: .infinity)
+                        }
+                    }
+                    .padding(ai.expanded ? 14 : 12)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: ai.expanded ? 16 : 22, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: ai.expanded ? 16 : 22, style: .continuous).stroke(Color.primary.opacity(0.10)))
                     .shadow(color: .black.opacity(0.28), radius: 28, y: 12)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                     .zIndex(3)
-            } else {
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { ai.open = true }
-                } label: {
-                    ZStack(alignment: .topTrailing) {
-                        AppIconImage(size: 54)
-                        Circle().fill(ai.isStreaming ? Color.orange : Color.green)
-                            .frame(width: 14, height: 14)
-                            .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2.5))
-                            .offset(x: 3, y: -3)
+                } else {
+                    let size = geo.size
+                    let def = CGPoint(x: size.width - 49, y: size.height - 47)
+                    let target = Self.clamp(ai.buttonPos ?? def, size: size)
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { ai.open = true }
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            AppIconImage(size: 54)
+                            Circle().fill(ai.isStreaming ? Color.orange : Color.green)
+                                .frame(width: 14, height: 14)
+                                .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2.5))
+                                .offset(x: 3, y: -3)
+                        }
+                        .shadow(color: dragging ? .black.opacity(0.45) : .clear, radius: 16, y: 8)
                     }
+                    .buttonStyle(.plain)
+                    .scaleEffect(dragging ? 1.08 : 1)
+                    .keyboardShortcut("k", modifiers: .command)
+                    .help("Open the Chief (⌘K) — drag anywhere to move this button")
+                    .padding(.trailing, 22).padding(.bottom, 20)
+                    .offset(x: target.x - def.x, y: target.y - def.y)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: dragging)
+                    .gesture(
+                        DragGesture()
+                            .onChanged { v in
+                                if dragOrigin == nil { dragOrigin = target }
+                                guard let origin = dragOrigin else { return }
+                                ai.buttonPos = Self.clamp(CGPoint(x: origin.x + v.translation.width, y: origin.y + v.translation.height), size: size)
+                                dragging = true
+                            }
+                            .onEnded { _ in
+                                dragOrigin = nil
+                                dragging = false
+                                ai.buttonPos = Self.clamp(ai.buttonPos ?? def, size: size)
+                                ai.persistButton()
+                            }
+                    )
+                    .transition(.opacity)
+                    .zIndex(2)
                 }
-                .buttonStyle(.plain)
-                .keyboardShortcut("k", modifiers: .command)
-                .help("Open the Chief (⌘K)")
-                .padding(.trailing, 22).padding(.bottom, 20)
-                .transition(.opacity)
-                .zIndex(2)
             }
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: ai.open)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: ai.expanded)
         }
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: ai.open)
         .sheet(isPresented: $ai.showSettings) {
             ProviderSettingsView().environmentObject(ai).environmentObject(model)
         }
@@ -77,6 +117,11 @@ struct AIChatPanel: View {
             headerButton("plus", "New chat") { ai.newChat() }
             headerButton("clock", "History") { withAnimation { ai.showHistory.toggle() } }
             headerButton("gearshape", "Providers") { ai.showSettings = true }
+            headerButton(ai.expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                         ai.expanded ? "Shrink panel" : "Expand to full window") {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { ai.expanded.toggle() }
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
             headerButton("xmark", "Close (⌘K)") { withAnimation { ai.open = false } }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
@@ -122,7 +167,6 @@ struct AIChatPanel: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    if ai.messages.isEmpty && !ai.isStreaming { welcome }
                     ForEach(ai.messages) { msg in MessageRow(message: msg).id(msg.id) }
                     if ai.isStreaming && !ai.streamingText.isEmpty {
                         MessageRow(message: ChatMessage(role: .assistant, text: ai.streamingText)).id("streaming")
@@ -132,7 +176,10 @@ struct AIChatPanel: View {
                             Text(ai.busyTool == nil ? "Thinking…" : "Working…").font(.system(size: 11)).foregroundStyle(.secondary)
                         }.id("streaming").padding(.leading, 4)
                     }
-                }.padding(16)
+                }
+                .frame(maxWidth: ai.expanded ? 860 : .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity)
+                .padding(16)
             }
             .onChange(of: ai.messages) { _, _ in
                 if ai.open {
@@ -144,28 +191,6 @@ struct AIChatPanel: View {
                 if ai.open, !ai.streamingText.isEmpty { proxy.scrollTo("streaming", anchor: .bottom) }
             }
         }
-    }
-
-    private var welcome: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Hi, I'm the Chief of Apps Operations.").font(.system(size: 15, weight: .semibold))
-            Text("I can run this app for you:").font(.system(size: 12)).foregroundStyle(.secondary)
-            ForEach([
-                "🔍 Search the web and read any page",
-                "📚 Read, create and edit skills in your library",
-                "📦 Install skills into Antigravity and OpenCode",
-                "📁 Read and write inside your workspace folders"
-            ], id: \.self) { line in
-                Text(line).font(.system(size: 12))
-            }
-            if ai.active == nil {
-                Text("Connect an OpenAI-compatible endpoint first — tap the gear above.")
-                    .font(.system(size: 12, weight: .medium)).foregroundStyle(.orange).padding(.top, 4)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private func busyBar(_ tool: String) -> some View {
